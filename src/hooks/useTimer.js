@@ -5,8 +5,13 @@ import {
     playAlarmSound,
 } from '../utils/notifications';
 
-const POMODORO_DURATION = 25 * 60; // 25 minutes in seconds
+// ─── Constants ───────────────────────────────────────────────────────
+const DEFAULT_DURATION_MINUTES = 25;
+const SECONDS_PER_MINUTE = 60;
+const MS_PER_SECOND = 1000;
 const STORAGE_KEY = 'pomodoro_timer_state';
+const PAD_LENGTH = 2;
+const PAD_CHAR = '0';
 
 // ─── localStorage helpers ────────────────────────────────────────────
 function loadState() {
@@ -39,20 +44,32 @@ export default function useTimer() {
     const workerRef = useRef(null);
     const hasFinishedRef = useRef(false);
 
+    // Track the chosen duration in minutes (user-configurable)
+    const [durationMinutes, setDurationMinutes] = useState(() => {
+        const saved = loadState();
+        return saved?.durationMinutes ?? DEFAULT_DURATION_MINUTES;
+    });
+
+    const totalSeconds = durationMinutes * SECONDS_PER_MINUTE;
+
     // Initialise from persisted state (if any)
     const [timeLeft, setTimeLeft] = useState(() => {
         const saved = loadState();
         if (saved?.isRunning && saved?.targetEndTime) {
-            const remaining = Math.round((saved.targetEndTime - Date.now()) / 1000);
+            const remaining = Math.round(
+                (saved.targetEndTime - Date.now()) / MS_PER_SECOND
+            );
             return remaining > 0 ? remaining : 0;
         }
-        return saved?.timeLeft ?? POMODORO_DURATION;
+        return saved?.timeLeft ?? DEFAULT_DURATION_MINUTES * SECONDS_PER_MINUTE;
     });
 
     const [isRunning, setIsRunning] = useState(() => {
         const saved = loadState();
         if (saved?.isRunning && saved?.targetEndTime) {
-            const remaining = Math.round((saved.targetEndTime - Date.now()) / 1000);
+            const remaining = Math.round(
+                (saved.targetEndTime - Date.now()) / MS_PER_SECOND
+            );
             return remaining > 0;
         }
         return false;
@@ -61,7 +78,9 @@ export default function useTimer() {
     const [targetEndTime, setTargetEndTime] = useState(() => {
         const saved = loadState();
         if (saved?.isRunning && saved?.targetEndTime) {
-            const remaining = Math.round((saved.targetEndTime - Date.now()) / 1000);
+            const remaining = Math.round(
+                (saved.targetEndTime - Date.now()) / MS_PER_SECOND
+            );
             if (remaining > 0) return saved.targetEndTime;
         }
         return null;
@@ -79,7 +98,7 @@ export default function useTimer() {
             // 'tick' — recalculate remaining from the timestamp
             setTargetEndTime((end) => {
                 if (!end) return end;
-                const remaining = Math.round((end - Date.now()) / 1000);
+                const remaining = Math.round((end - Date.now()) / MS_PER_SECOND);
 
                 if (remaining <= 0) {
                     setTimeLeft(0);
@@ -119,13 +138,19 @@ export default function useTimer() {
 
     // ── Persist state on every change ──────────────────────────────────
     useEffect(() => {
-        saveState({ timeLeft, isRunning, targetEndTime });
-    }, [timeLeft, isRunning, targetEndTime]);
+        saveState({ timeLeft, isRunning, targetEndTime, durationMinutes });
+    }, [timeLeft, isRunning, targetEndTime, durationMinutes]);
 
     // ── Update document.title ──────────────────────────────────────────
     useEffect(() => {
-        const mins = String(Math.floor(timeLeft / 60)).padStart(2, '0');
-        const secs = String(timeLeft % 60).padStart(2, '0');
+        const mins = String(Math.floor(timeLeft / SECONDS_PER_MINUTE)).padStart(
+            PAD_LENGTH,
+            PAD_CHAR
+        );
+        const secs = String(timeLeft % SECONDS_PER_MINUTE).padStart(
+            PAD_LENGTH,
+            PAD_CHAR
+        );
 
         if (isRunning) {
             document.title = `(${mins}:${secs}) Focus — Pomodoro`;
@@ -141,7 +166,7 @@ export default function useTimer() {
         requestNotificationPermission();
         hasFinishedRef.current = false;
 
-        const end = Date.now() + timeLeft * 1000;
+        const end = Date.now() + timeLeft * MS_PER_SECOND;
         setTargetEndTime(end);
         setIsRunning(true);
 
@@ -157,16 +182,44 @@ export default function useTimer() {
     const reset = useCallback(() => {
         setIsRunning(false);
         setTargetEndTime(null);
-        setTimeLeft(POMODORO_DURATION);
+        setTimeLeft(totalSeconds);
         hasFinishedRef.current = false;
         workerRef.current?.postMessage({ type: 'stop' });
         clearState();
-    }, []);
+    }, [totalSeconds]);
+
+    // Change duration (only allowed while not running)
+    const setDuration = useCallback(
+        (newMinutes) => {
+            if (isRunning) return;
+            const clamped = Math.max(1, Math.min(newMinutes, 120));
+            setDurationMinutes(clamped);
+            setTimeLeft(clamped * SECONDS_PER_MINUTE);
+        },
+        [isRunning]
+    );
 
     // ── Derived values ─────────────────────────────────────────────────
-    const minutes = String(Math.floor(timeLeft / 60)).padStart(2, '0');
-    const seconds = String(timeLeft % 60).padStart(2, '0');
-    const progress = 1 - timeLeft / POMODORO_DURATION; // 0 → 1
+    const minutes = String(Math.floor(timeLeft / SECONDS_PER_MINUTE)).padStart(
+        PAD_LENGTH,
+        PAD_CHAR
+    );
+    const seconds = String(timeLeft % SECONDS_PER_MINUTE).padStart(
+        PAD_LENGTH,
+        PAD_CHAR
+    );
+    const progress = 1 - timeLeft / totalSeconds; // 0 → 1
 
-    return { minutes, seconds, isRunning, timeLeft, progress, start, pause, reset };
+    return {
+        minutes,
+        seconds,
+        isRunning,
+        timeLeft,
+        progress,
+        durationMinutes,
+        start,
+        pause,
+        reset,
+        setDuration,
+    };
 }

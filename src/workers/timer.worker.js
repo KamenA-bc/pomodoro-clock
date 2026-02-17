@@ -2,6 +2,10 @@
 // Runs a setInterval in a separate thread so browser tab throttling
 // cannot freeze the tick cadence.
 
+// ─── Constants ───────────────────────────────────────────────────────
+const TICK_INTERVAL_MS = 1000;
+
+// ─── State ───────────────────────────────────────────────────────────
 let intervalId = null;
 
 self.onmessage = function (e) {
@@ -13,11 +17,11 @@ self.onmessage = function (e) {
       clearInterval(intervalId);
     }
 
-    // Post an immediate tick, then every second
+    // Post an immediate tick, then every TICK_INTERVAL_MS
     self.postMessage({ type: 'tick' });
     intervalId = setInterval(() => {
       self.postMessage({ type: 'tick' });
-    }, 1000);
+    }, TICK_INTERVAL_MS);
   }
 
   if (type === 'stop') {
